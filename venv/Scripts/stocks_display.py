@@ -7,8 +7,7 @@ import logging
 class StockDisplay:
     def __init__(self, config):
         self.api_key = config["Stock"]["api_key"]
-        self.stock_symbols = ['COST']
-        # 'TSM', 'LEN', 'GOOG', 'VOO', 'CAT', 'COST', 'DXCM', 'MSFT' 'AXP'
+        self.stock_symbols = ['COST','TSM', 'LEN', 'GOOG', 'VOO', 'CAT', 'COST', 'DXCM', 'MSFT' 'AXP']
         self.stocks = [Stock(self.api_key, symbol) for symbol in self.stock_symbols]
         self.current_stock_index = 0
         self.logger = logging.getLogger(__name__)
