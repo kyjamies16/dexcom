@@ -18,7 +18,7 @@ class DisplayManager:
         self.display_index = 0
         self.matrix = self.setup_matrix()
         self.sleep_duration = 5  # Initial sleep duration
-        self.display_durations = [5, 5, 20]  # Durations for glucose, weather, and stock display
+        self.display_durations = [60, 60, 10]  # Durations for glucose, weather, and stock display
 
     def setup_matrix(self):
         options = RGBMatrixOptions()
@@ -81,6 +81,12 @@ class DisplayManager:
                 # Display stock data
                 self.stock_display.display(canvas, font_small)
                 self.sleep_duration = self.display_durations[2]
+
+                # Check if all stocks have been displayed
+                if self.stocks_displayed_count >= len(self.stock_display.stock_data_table):
+                    self.stocks_displayed_count = 0  # Reset counter
+                    self.display_index = (self.display_index + 1) % 3  # Rotate to the next display
+
 
             # Update the LED matrix
             canvas = self.matrix.SwapOnVSync(canvas)
