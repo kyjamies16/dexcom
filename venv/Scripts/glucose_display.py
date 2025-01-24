@@ -1,6 +1,6 @@
 # glucose_display.py
 from blood_glucose import Glucose
-from RGBMatrixEmulator import graphics
+from rgbmatrix import RGBMatrix, graphics
 
 
 class GlucoseDisplay:

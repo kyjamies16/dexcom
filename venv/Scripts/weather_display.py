@@ -1,11 +1,10 @@
 # weather_display.py
 from weather import Weather
-from RGBMatrixEmulator import graphics
+from rgbmatrix import RGBMatrix, graphics
 
 class WeatherDisplay:
     def __init__(self, config):
         self.weather = Weather(config["Weather"]["api_key"])
-        # Initialize RGB matrix, load fonts, etc.
 
     def display(self, canvas, font_large):
         weather_data = self.weather.get_current_weather()

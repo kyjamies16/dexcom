@@ -30,6 +30,8 @@ class Stock:
         return None
 
     def get_stock_icon_path(self):
-        return  f"C:\\Users\\krjam\\OneDrive\\Documents\\Stock Images\\{self.stock_symbol}.png"
+        current_dir = os.path.dirname(__file__)  # Get the directory where the script is located
+        stock_images_dir = os.path.join(current_dir, 'StockImages')  # Construct the path to StockImages
+        return os.path.join(stock_images_dir, f"{self.stock_symbol}.png")
 
 
