@@ -2,7 +2,11 @@ import logging
 import time
 from datetime import datetime, timedelta, time as dtime
 import schedule
-from rgbmatrix import RGBMatrix, RGBMatrixOptions, graphics
+from matrix_helper import RGBMatrix, RGBMatrixOptions, graphics, initialize_matrix
+from weather_display import WeatherDisplay
+from glucose_display import GlucoseDisplay
+from stocks_display import StockDisplay
+
 
 class DisplayManager:
     def __init__(self, config):
@@ -16,17 +20,15 @@ class DisplayManager:
         self.sleep_duration = 5  # Initial sleep duration
         self.display_durations = [60, 60, 15]
         self.current_stock_index = 0
+
         self.showing_stocks = False
         self.stock_display_end_time = None
 
     def setup_matrix(self):
         options = RGBMatrixOptions()
-        options.rows = 32
-        options.cols = 64
-        options.chain_length = 1
-        options.parallel = 1
-        options.hardware_mapping = 'adafruit-hat'
-        options.brightness = 50
+        for key, value in self.config.items('RGBMatrix'):
+            if hasattr(options, key):
+                setattr(options, key, type(getattr(options, key))(value))
         return RGBMatrix(options=options)
 
     def get_current_datetime(self):
@@ -99,7 +101,7 @@ class DisplayManager:
                     # Display weather data
                     self.weather_display.display(canvas, font_large)
                     self.sleep_duration = self.display_durations[1]
-                    self.display_index += 1
+                    self.display_index = 0
                     self.logger.info("Displaying weather data")
                 else:
                     # Reset display index

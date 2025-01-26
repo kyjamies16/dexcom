@@ -4,7 +4,7 @@ import json
 from PIL import ImageEnhance, Image
 from datetime import datetime
 from stocks import Stock
-from rgbmatrix import RGBMatrix, graphics
+
 
 class StockDisplay:
     def __init__(self, config):

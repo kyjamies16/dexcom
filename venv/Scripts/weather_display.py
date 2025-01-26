@@ -1,6 +1,7 @@
 # weather_display.py
 from weather import Weather
-from rgbmatrix import RGBMatrix, graphics
+from matrix_helper import RGBMatrix, RGBMatrixOptions, graphics, initialize_matrix
+
 
 class WeatherDisplay:
     def __init__(self, config):
