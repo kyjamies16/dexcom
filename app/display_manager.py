@@ -1,11 +1,15 @@
 import logging
 import time
 from datetime import datetime, timedelta, time as dtime
+from pathlib import Path
+
 import schedule
-from matrix_helper import RGBMatrix, RGBMatrixOptions, graphics, initialize_matrix
-from weather_display import WeatherDisplay
-from glucose_display import GlucoseDisplay
-from stocks_display import StockDisplay
+
+from .matrix.helper import RGBMatrix, RGBMatrixOptions, graphics, initialize_matrix
+from .displays.weather import WeatherDisplay
+from .displays.glucose import GlucoseDisplay
+from .displays.stocks import StockDisplay
+from .utils.datetime import format_display_datetime
 
 
 class DisplayManager:
@@ -31,47 +35,39 @@ class DisplayManager:
                 setattr(options, key, type(getattr(options, key))(value))
         return RGBMatrix(options=options)
 
-    def get_current_datetime(self):
-        now = datetime.now()
-        formatted_date = now.strftime("%b %d")
-        formatted_time = now.strftime("%I:%M %p")
-        formatted_datetime = f"{formatted_date} {formatted_time}"
-        return formatted_datetime
-
     def is_market_closed(self):
         now = datetime.now().time()
         market_close_time = dtime(16, 0)  # Assuming market closes at 4 PM
         return now >= market_close_time
 
     def fetch_stock_data_on_market_close(self):
-        if self.is_market_closed():
-            self.stock_display.stock_data_table = self.stock_display.fetch_all_stock_info()
-            self.stock_display.save_stock_info_to_file()
-            self.logger.info("Stock data updated after market close")
-            self.showing_stocks = True
-            self.stock_display_end_time = datetime.now() + timedelta(hours=1)
+        # Temporarily bypass the 4 PM restriction so we can test stocks any time.
+        self.stock_display.async_refresh_stock_data()
+        self.logger.info("Stock data updated (4 PM gate disabled for testing)")
+        self.showing_stocks = True
+        self.stock_display_end_time = datetime.now() + timedelta(hours=1)
 
     def display_text(self, canvas, font, x, y, color, text):
         graphics.DrawText(canvas, font, x, y, color, text)
 
     def run(self):
+        script_dir = Path(__file__).resolve().parent
+        font_dir = script_dir / "assets" / "fonts"
         font_small = graphics.Font()
-        font_small.LoadFont("4x6.bdf")  # Use a smaller font
+        font_small.LoadFont(str(font_dir / "4x6.bdf"))  # Use a smaller font
 
         font_large = graphics.Font()
-        font_large.LoadFont("5x8.bdf")
+        font_large.LoadFont(str(font_dir / "5x8.bdf"))
 
-        # Schedule the task to run when the stock market closes (e.g., 4 PM)
-        schedule.every().day.at("16:00").do(self.fetch_stock_data_on_market_close)
+        # schedule.every().day.at("16:00").do(self.fetch_stock_data_on_market_close)
+        # For testing we trigger the refresh immediately so stocks render without waiting.
+        self.fetch_stock_data_on_market_close()
 
         while True:
             canvas = self.matrix.CreateFrameCanvas()
-            # Get current date and time
-            current_datetime = self.get_current_datetime()
-
             # Display date and time at the top of the screen
             self.display_text(
-                canvas, font_small, 2, 8, graphics.Color(255, 165, 0), current_datetime)
+                canvas, font_small, 2, 8, graphics.Color(255, 165, 0), format_display_datetime())
 
             now = datetime.now()
 
@@ -79,7 +75,7 @@ class DisplayManager:
                 # Display stock data
                 if self.current_stock_index < len(self.stock_display.stock_data_table):
                     self.stock_display.current_stock_index = self.current_stock_index
-                    self.stock_display.display(canvas, font_small)
+                    self.stock_display.display(canvas, font_small, font_large)
                     self.sleep_duration = self.display_durations[2]
                     self.current_stock_index += 1
                     self.logger.info(
@@ -116,7 +112,3 @@ class DisplayManager:
 
 
 
-# Run the DisplayManager
-if __name__ == "__main__":
-    display_manager = DisplayManager(config)
-    display_manager.run()
