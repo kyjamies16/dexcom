@@ -1,0 +1,19 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Virtual environments and dependencies
+venv/
+.env
+.env.*
+
+# IDE/project files
+.idea/
+.vscode/
+
+# Application secrets
+config.ini
+config.local.ini
+
+# Misc
+*.log

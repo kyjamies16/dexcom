@@ -1,0 +1,5 @@
+pydexcom==0.4.1
+requests==2.32.3
+schedule==1.2.2
+Pillow==11.1.0
+RGBMatrixEmulator==0.12.1  # Optional: for local dev testing
