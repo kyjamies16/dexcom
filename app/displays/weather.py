@@ -44,9 +44,10 @@ class WeatherDisplay(BaseDisplay):
         weather_icon = self._get_icon(weather_icon_code)
 
         if weather_icon:
-            icon = weather_icon.copy()
-            icon.thumbnail((18, 18))
-            canvas.SetImage(icon.convert("RGB"), 4, 12)
+            icon = self._prepare_icon(weather_icon, (24, 24))
+            icon_height = icon.size[1]
+            icon_y = max(10, 30 - icon_height)
+            canvas.SetImage(icon.convert("RGB"), 0, icon_y)
 
         text_x = 32
         if temperature is not None:
@@ -107,10 +108,9 @@ class WeatherDisplay(BaseDisplay):
 
             icon = self._get_icon(day_data.get("icon"))
             if icon:
-                resized = icon.copy()
-                resized.thumbnail((16, 12))
+                resized = self._prepare_icon(icon, (16, 12))
                 icon_x = max(0, x_center - resized.width // 2)
-                canvas.SetImage(resized.convert("RGB"), icon_x, 12)
+                canvas.SetImage(resized.convert("RGB"), icon_x, 11)
 
             high_text = f"{int(day_data['high'])}°"
             low_text = f"{int(day_data['low'])}°"
@@ -126,12 +126,11 @@ class WeatherDisplay(BaseDisplay):
         description = ""
         if weather_data:
             weather = weather_data.get("weather") or [{}]
-            description = (weather[0].get("description") or "").strip().title()
-        message = (
-            f"{self.city} Weather Report: {description}"
-            if description
-            else f"{self.city} Weather Report"
-        )
+            description = (weather[0].get("description") or "").strip()
+        if description:
+            message = f"It's {description} in {self.city}"
+        else:
+            message = f"{self.city} weather report"
         if message != self.marquee_message:
             self.marquee_message = message
             self.marquee_x = float(self.display_width)
@@ -156,6 +155,14 @@ class WeatherDisplay(BaseDisplay):
             self.icon_cache[icon_code] = self.weather.get_weather_icon(icon_code)
         return self.icon_cache[icon_code]
 
+    def _prepare_icon(self, icon, max_size):
+        processed = icon.copy()
+        processed.thumbnail(max_size)
+        bbox = processed.getbbox()
+        if bbox:
+            processed = processed.crop(bbox)
+        return processed
+
     def _measure_text(self, font, text):
         width = 0
         for char in text:
@@ -164,4 +171,3 @@ class WeatherDisplay(BaseDisplay):
             except AttributeError:
                 width += 6
         return width
-

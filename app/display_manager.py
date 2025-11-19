@@ -26,9 +26,6 @@ class DisplayManager:
         self.display_durations = [60, 60]
         self.stock_cycle_duration = 60
         self.stock_data_last_refresh: Optional[datetime] = None
-        self.stock_marquee_duration = int(
-            config["Stock"].get("marquee_panel_seconds", "10")
-        )
 
         self.market_close_time = dtime(16, 0)
         schedule.every().day.at(self.market_close_time.strftime("%H:%M")).do(
@@ -50,6 +47,10 @@ class DisplayManager:
         for key, value in self.config.items('RGBMatrix'):
             if hasattr(options, key):
                 setattr(options, key, type(getattr(options, key))(value))
+        if getattr(options, "brightness", None):
+            options.brightness = max(20, int(options.brightness) // 2)
+        else:
+            options.brightness = 40
         return RGBMatrix(options=options)
 
     def is_market_closed(self):
@@ -109,14 +110,6 @@ class DisplayManager:
             # Run scheduled tasks
             schedule.run_pending()
 
-    def _stock_marquee_message(self) -> str:
-        if not self.stock_data_last_refresh:
-            return "Stock market performance: awaiting refresh"
-        formatted = self.stock_data_last_refresh.strftime("%A %B %d").replace(
-            " 0", " "
-        )
-        return f"Stock market performance from {formatted}"
-
     def _display_stock_cycle(self, font_small, font_large):
         now_monotonic = time.monotonic()
         idle_elapsed = now_monotonic - getattr(
@@ -125,28 +118,7 @@ class DisplayManager:
         if idle_elapsed > 0:
             self.stock_display.fast_forward_scroll(idle_elapsed, font_small, font_large)
         cycle_end = time.monotonic() + self.stock_cycle_duration
-        frame_delay = 0.1
-
-        marquee_message = self._stock_marquee_message()
-        scroll_x = float(self.stock_display.display_width)
-        marquee_speed = max(self.stock_display.scroll_speed, 1)
-        marquee_end = time.monotonic() + max(self.stock_marquee_duration, 5)
-        while time.monotonic() < marquee_end:
-            canvas = self.matrix.CreateFrameCanvas()
-            self.display_text(
-                canvas,
-                font_small,
-                int(scroll_x),
-                12,
-                graphics.Color(173, 216, 230),
-                marquee_message,
-            )
-            canvas = self.matrix.SwapOnVSync(canvas)
-            scroll_x -= marquee_speed
-            if scroll_x + self.stock_display._measure_text(font_small, marquee_message) < 0:
-                scroll_x = float(self.stock_display.display_width)
-            time.sleep(frame_delay)
-            schedule.run_pending()
+        frame_delay = 0.12
 
         while time.monotonic() < cycle_end:
             canvas = self.matrix.CreateFrameCanvas()
@@ -192,7 +164,7 @@ class DisplayManager:
             ("current", self.weather_display.current_panel_duration),
             ("forecast", self.weather_display.forecast_panel_duration),
         ]
-        frame_delay = 0.1
+        frame_delay = 0.12
         for panel_type, duration in panels:
             cycle_end = time.monotonic() + max(duration, 5)
             while time.monotonic() < cycle_end:
