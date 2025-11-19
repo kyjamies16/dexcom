@@ -41,6 +41,7 @@ class DisplayManager:
             self.logger.info(
                 "No cached stock data found; awaiting 4 PM refresh for live updates"
             )
+
     def setup_matrix(self):
         options = RGBMatrixOptions()
 
@@ -75,15 +76,21 @@ class DisplayManager:
 
         # Apply sensible defaults for smoother rendering/flicker reduction
         try:
-            options.brightness = max(20, int(getattr(options, "brightness", 80)) // 2)
+            configured_brightness = int(
+                self.config.get("RGBMatrix", "brightness", fallback="85")
+            )
+            options.brightness = max(30, min(100, configured_brightness))
         except Exception:
-            options.brightness = 40
+            options.brightness = 70
 
         if not getattr(options, "limit_refresh_rate_hz", None):
-            options.limit_refresh_rate_hz = 60
+            options.limit_refresh_rate_hz = 120
 
         if not getattr(options, "pwm_lsb_nanoseconds", None):
-            options.pwm_lsb_nanoseconds = 200
+            options.pwm_lsb_nanoseconds = 130
+
+        if not getattr(options, "gpio_slowdown", None):
+            options.gpio_slowdown = 2
 
         return RGBMatrix(options=options)
           
@@ -200,7 +207,7 @@ class DisplayManager:
             ("current", self.weather_display.current_panel_duration),
             ("forecast", self.weather_display.forecast_panel_duration),
         ]
-        frame_delay = 0.1
+        frame_delay = 0.06
         for panel_type, duration in panels:
             cycle_end = time.monotonic() + max(duration, 5)
             while time.monotonic() < cycle_end:

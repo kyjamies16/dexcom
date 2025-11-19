@@ -113,8 +113,9 @@ class WeatherDisplay(BaseDisplay):
                 icon_x = max(0, x_center - resized.width // 2)
                 canvas.SetImage(resized.convert("RGB"), icon_x, 11)
 
-            high_text = f"{int(day_data['high'])}°"
-            low_text = f"{int(day_data['low'])}°"
+            degree_symbol = chr(176)
+            high_text = f"{int(day_data['high'])}{degree_symbol}"
+            low_text = f"{int(day_data['low'])}{degree_symbol}"
             high_x = max(
                 0, x_center - self._measure_text(font_small, high_text) // 2
             )
