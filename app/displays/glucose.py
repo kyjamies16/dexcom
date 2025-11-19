@@ -6,7 +6,13 @@ from .base import BaseDisplay
 
 class GlucoseDisplay(BaseDisplay):
     def __init__(self, config):
-        self.glucose = Glucose(config["Dexcom"]["username"], config["Dexcom"]["password"])
+        dexcom_cfg = config["Dexcom"]
+        self.glucose = Glucose(
+            username=dexcom_cfg.get("username"),
+            password=dexcom_cfg.get("password"),
+            account_id=dexcom_cfg.get("account_id"),
+            region=dexcom_cfg.get("region", "us"),
+        )
 
     # Initialize RGB matrix, load fonts, etc.
     def display(self, canvas, font_large, font_small):

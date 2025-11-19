@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class StockDisplay(BaseDisplay):
-    def __init__(self, config):
+    def __init__(self, config, auto_refresh: bool = True):
         self.api_key = config["Stock"]["api_key"]
         self.stock_symbols = ['COST','TSM', 'LEN', 'GOOG', 'VOO', 'CAT', 'DXCM', 'MSFT', 'AXP']
         self.stocks = [Stock(self.api_key, symbol) for symbol in self.stock_symbols]
@@ -26,11 +26,15 @@ class StockDisplay(BaseDisplay):
         self.display_width = int(config.get('RGBMatrix', 'cols', fallback='64'))
         self.scroll_x = self.display_width
         self.scroll_speed = int(config["Stock"].get("scroll_speed_pixels", 1))
+        frame_interval = float(config["Stock"].get("scroll_frame_interval_seconds", 0.1))
+        self.frame_interval = frame_interval if frame_interval > 0 else 0.1
+        self.last_scroll_update = time.monotonic()
         self.stock_data_table = self.read_stock_data_from_file() or []
         self._refresh_thread = None
 
         # Fetch stock information asynchronously so UI isn't blocked
-        self.async_refresh_stock_data()
+        if auto_refresh:
+            self.async_refresh_stock_data()
 
     def fetch_all_stock_info(self):
         stock_data_table = []
@@ -63,6 +67,36 @@ class StockDisplay(BaseDisplay):
             self.logger.info("Stock data refreshed for %d symbols", len(updated_data))
         else:
             self.logger.warning("Stock data refresh skipped: no data returned")
+
+    def _current_text_width(self, font_small, font_large):
+        if not self.stock_data_table:
+            return 0
+        stock_data = self.stock_data_table[self.current_stock_index % len(self.stock_data_table)]
+        symbol_font = font_large if font_large else font_small
+        symbol_width = self._measure_text(symbol_font, stock_data['symbol'])
+        colon_width = self._measure_text(font_small, ": ")
+        percent_text = self._format_percent_change(stock_data['percent_change'])
+        percent_width = self._measure_text(font_small, percent_text)
+        padding = 2
+        return symbol_width + padding + colon_width + percent_width
+
+    def fast_forward_scroll(self, elapsed_seconds, font_small, font_large=None):
+        if not self.stock_data_table or elapsed_seconds <= 0:
+            return
+        steps = int(elapsed_seconds / self.frame_interval)
+        if steps <= 0:
+            return
+        pixels_per_step = max(self.scroll_speed, 1)
+        text_width = self._current_text_width(font_small, font_large)
+        for _ in range(steps):
+            self.scroll_x -= pixels_per_step
+            if text_width and self.scroll_x + text_width < 0:
+                self.scroll_x = self.display_width
+                self.current_stock_index = (
+                    self.current_stock_index + 1
+                ) % len(self.stock_data_table)
+                text_width = self._current_text_width(font_small, font_large)
+        self.last_scroll_update = time.monotonic()
 
     def _format_percent_change(self, percent_change_value):
         try:
@@ -103,7 +137,9 @@ class StockDisplay(BaseDisplay):
         if stock_data:
             symbol = stock_data['symbol']
             change = stock_data['change']
-            percent_change_formatted = self._format_percent_change(stock_data['percent_change'])
+            percent_change_formatted = self._format_percent_change(
+                stock_data['percent_change']
+            )
             percent_color = self._get_percent_color(change)
 
             scroll_y = 22
@@ -114,19 +150,44 @@ class StockDisplay(BaseDisplay):
             percent_width = self._measure_text(font_small, percent_change_formatted)
 
             symbol_x = self.scroll_x
-            colon_x = symbol_x + symbol_width
+            padding = 2
+            colon_x = symbol_x + symbol_width + padding
             percent_x = colon_x + colon_width
 
-            self.draw_text(canvas, symbol_font, symbol_x, scroll_y, graphics.Color(135, 206, 250), symbol)
-            self.draw_text(canvas, font_small, colon_x, scroll_y, graphics.Color(255, 255, 255), colon_text)
-            self.draw_text(canvas, font_small, percent_x, scroll_y, percent_color, percent_change_formatted)
+            self.draw_text(
+                canvas,
+                symbol_font,
+                symbol_x,
+                scroll_y,
+                graphics.Color(135, 206, 250),
+                symbol,
+            )
+            self.draw_text(
+                canvas,
+                font_small,
+                colon_x,
+                scroll_y,
+                graphics.Color(255, 255, 255),
+                colon_text,
+            )
+            self.draw_text(
+                canvas,
+                font_small,
+                percent_x,
+                scroll_y,
+                percent_color,
+                percent_change_formatted,
+            )
 
-            text_width = symbol_width + colon_width + percent_width
+            text_width = symbol_width + padding + colon_width + percent_width
             self.scroll_x -= max(self.scroll_speed, 1)
 
             if self.scroll_x + text_width < 0:
                 self.scroll_x = self.display_width
-                self.current_stock_index = (self.current_stock_index + 1) % len(self.stock_data_table)
+                self.current_stock_index = (
+                    self.current_stock_index + 1
+                ) % len(self.stock_data_table)
+            self.last_scroll_update = time.monotonic()
 
     def write_stock_data_to_file(self):
         if not self.stock_data_table:

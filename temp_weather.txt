@@ -1,0 +1,30 @@
+# weather_display.py
+from ..services.weather import Weather
+from ..matrix.helper import graphics
+from .base import BaseDisplay
+
+
+class WeatherDisplay(BaseDisplay):
+    def __init__(self, config):
+        self.weather = Weather(config["Weather"]["api_key"])
+
+    def display(self, canvas, font_large):
+        weather_data = self.weather.get_current_weather()
+        if weather_data:
+            temperature = weather_data['main']['temp']
+            weather_text = f"{int(temperature)}°F"
+
+            # Display weather information
+            self.draw_text(canvas, font_large, 32, 24, graphics.Color(255, 255, 255), weather_text)
+
+            # Get and display weather icon
+            weather_icon_code = weather_data['weather'][0]['icon']
+            weather_icon = self.weather.get_weather_icon(weather_icon_code)
+
+            if weather_icon:
+                weather_icon.thumbnail((22, 18))
+                canvas.SetImage(weather_icon.convert('RGB'), 8, 10)
+        else:
+            # Display "No weather data available" if there is no weather data
+            self.draw_text(canvas, font_large, 22, 22, graphics.Color(255, 255, 255), "N/A")
+
