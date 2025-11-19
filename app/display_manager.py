@@ -23,8 +23,8 @@ class DisplayManager:
         self.display_index = 0
         self.matrix = self.setup_matrix()
         self.sleep_duration = 5  # Initial sleep duration
-        self.display_durations = [60, 60]
-        self.stock_cycle_duration = 60
+        self.display_durations = [10, 10]
+        self.stock_cycle_duration = 30
         self.stock_data_last_refresh: Optional[datetime] = None
 
         self.market_close_time = dtime(16, 0)
@@ -41,17 +41,53 @@ class DisplayManager:
             self.logger.info(
                 "No cached stock data found; awaiting 4 PM refresh for live updates"
             )
-
     def setup_matrix(self):
         options = RGBMatrixOptions()
-        for key, value in self.config.items('RGBMatrix'):
-            if hasattr(options, key):
-                setattr(options, key, type(getattr(options, key))(value))
-        if getattr(options, "brightness", None):
-            options.brightness = max(20, int(options.brightness) // 2)
+
+        if not self.config.has_section("RGBMatrix"):
+            self.logger.warning("No [RGBMatrix] section found in config.ini; using defaults.")
         else:
+            for key, value in self.config.items("RGBMatrix"):
+                if not hasattr(options, key):
+                    self.logger.warning("Unknown RGBMatrix option '%s'; skipping.", key)
+                    continue
+
+                current = getattr(options, key)
+                raw = str(value)
+
+                if isinstance(current, bool):
+                    casted = raw.lower() in ("1", "true", "yes", "on")
+                elif isinstance(current, int):
+                    casted = int(raw)
+                elif isinstance(current, float):
+                    casted = float(raw)
+                else:
+                    # str or any other custom type
+                    casted = raw
+
+                setattr(options, key, casted)
+                self.logger.debug(
+                    "RGBMatrix option %s set to %r (type %s)",
+                    key,
+                    casted,
+                    type(casted).__name__,
+                )
+
+        # Apply sensible defaults for smoother rendering/flicker reduction
+        try:
+            options.brightness = max(20, int(getattr(options, "brightness", 80)) // 2)
+        except Exception:
             options.brightness = 40
+
+        if not getattr(options, "limit_refresh_rate_hz", None):
+            options.limit_refresh_rate_hz = 60
+
+        if not getattr(options, "pwm_lsb_nanoseconds", None):
+            options.pwm_lsb_nanoseconds = 200
+
         return RGBMatrix(options=options)
+          
+
 
     def is_market_closed(self):
         now = datetime.now().time()
@@ -118,7 +154,7 @@ class DisplayManager:
         if idle_elapsed > 0:
             self.stock_display.fast_forward_scroll(idle_elapsed, font_small, font_large)
         cycle_end = time.monotonic() + self.stock_cycle_duration
-        frame_delay = 0.12
+        frame_delay = 0.1
 
         while time.monotonic() < cycle_end:
             canvas = self.matrix.CreateFrameCanvas()
@@ -164,7 +200,7 @@ class DisplayManager:
             ("current", self.weather_display.current_panel_duration),
             ("forecast", self.weather_display.forecast_panel_duration),
         ]
-        frame_delay = 0.12
+        frame_delay = 0.1
         for panel_type, duration in panels:
             cycle_end = time.monotonic() + max(duration, 5)
             while time.monotonic() < cycle_end:

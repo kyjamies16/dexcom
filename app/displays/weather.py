@@ -10,10 +10,10 @@ class WeatherDisplay(BaseDisplay):
         api_key = config["Weather"]["api_key"]
         self.weather = Weather(api_key, city=self.city, cache_ttl_seconds=cache_ttl)
         self.current_panel_duration = int(
-            config["Weather"].get("current_panel_seconds", "25")
+            config["Weather"].get("current_panel_seconds", "15")
         )
         self.forecast_panel_duration = int(
-            config["Weather"].get("forecast_panel_seconds", "20")
+            config["Weather"].get("forecast_panel_seconds", "15")
         )
         self.marquee_panel_duration = int(
             config["Weather"].get("marquee_panel_seconds", "15")
@@ -46,8 +46,9 @@ class WeatherDisplay(BaseDisplay):
         if weather_icon:
             icon = self._prepare_icon(weather_icon, (24, 24))
             icon_height = icon.size[1]
-            icon_y = max(10, 30 - icon_height)
-            canvas.SetImage(icon.convert("RGB"), 0, icon_y)
+            icon_y = max(2, 24 - icon_height)
+            icon_x = max(0, 12 - icon.size[0] // 2)
+            canvas.SetImage(icon.convert("RGB"), icon_x, icon_y)
 
         text_x = 32
         if temperature is not None:
@@ -66,7 +67,7 @@ class WeatherDisplay(BaseDisplay):
             self.draw_text(
                 canvas,
                 font_mini,
-                text_x,
+                24,
                 28,
                 graphics.Color(173, 216, 230),
                 feels_text.upper(),
@@ -119,7 +120,7 @@ class WeatherDisplay(BaseDisplay):
             )
             low_x = max(0, x_center - self._measure_text(font_small, low_text) // 2)
             self.draw_text(canvas, font_small, high_x, 25, high_color, high_text)
-            self.draw_text(canvas, font_small, low_x, 30, low_color, low_text)
+            self.draw_text(canvas, font_small, low_x, 31, low_color, low_text)
 
     def render_marquee(self, canvas, font_small):
         weather_data = self.weather.get_current_weather()
@@ -128,7 +129,8 @@ class WeatherDisplay(BaseDisplay):
             weather = weather_data.get("weather") or [{}]
             description = (weather[0].get("description") or "").strip()
         if description:
-            message = f"It's {description} in {self.city}"
+            condition_text = self._format_condition_text(description)
+            message = f"{condition_text} in {self.city}"
         else:
             message = f"{self.city} weather report"
         if message != self.marquee_message:
@@ -171,3 +173,24 @@ class WeatherDisplay(BaseDisplay):
             except AttributeError:
                 width += 6
         return width
+
+    def _format_condition_text(self, description: str) -> str:
+        desc = description.lower()
+        rules = [
+            ("overcast", "Skies are overcast"),
+            ("broken clouds", "Skies are mostly cloudy"),
+            ("scattered clouds", "Skies are partly cloudy"),
+            ("few clouds", "Skies have a few clouds"),
+            ("clear sky", "Skies are clear"),
+            ("thunderstorm", "Thunderstorms in the area"),
+            ("drizzle", "Light drizzle is falling"),
+            ("rain", "Expect " + desc),
+            ("snow", "Snow is falling"),
+            ("mist", "Conditions are misty"),
+            ("fog", "Foggy conditions"),
+            ("haze", "Conditions are hazy"),
+        ]
+        for keyword, phrase in rules:
+            if keyword in desc:
+                return phrase
+        return f"Conditions are {description}"
