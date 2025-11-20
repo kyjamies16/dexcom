@@ -10,6 +10,7 @@ from .matrix.helper import RGBMatrix, RGBMatrixOptions, graphics
 from .displays.weather import WeatherDisplay
 from .displays.glucose import GlucoseDisplay
 from .displays.stocks import StockDisplay
+from .displays.sports import SportsDisplay
 from .utils.datetime import format_display_datetime
 
 
@@ -20,10 +21,12 @@ class DisplayManager:
         self.weather_display = WeatherDisplay(config)
         self.glucose_display = GlucoseDisplay(config)
         self.stock_display = StockDisplay(config, auto_refresh=False)
+        self.sports_display = SportsDisplay(config)
         self.display_index = 0
         self.matrix = self.setup_matrix()
         self.sleep_duration = 5  # Initial sleep duration
         self.display_durations = [10, 10]
+        self.sports_duration = int(config.get("NFL", "panel_seconds", fallback="8"))
         self.stock_cycle_duration = 30
         self.stock_data_last_refresh: Optional[datetime] = None
 
@@ -125,7 +128,7 @@ class DisplayManager:
             canvas = self.matrix.CreateFrameCanvas()
             header_color = (
                 graphics.Color(200, 120, 0)
-                if self.display_index == 1
+                if self.display_index in (1, 2)
                 else graphics.Color(255, 165, 0)
             )
             self.display_text(canvas, font_small, 2, 8, header_color, format_display_datetime())
@@ -141,6 +144,11 @@ class DisplayManager:
                 self._display_weather_cycle(font_small, font_large, font_mini)
                 self.display_index = 2
                 continue
+            elif self.display_index == 2:
+                self.logger.info("Displaying sports data (Colts)")
+                self.sports_display.display(canvas, font_large, font_small)
+                self.sleep_duration = self.sports_duration
+                self.display_index = 3
             else:
                 self._display_stock_cycle(font_small, font_large)
                 self.display_index = 0
