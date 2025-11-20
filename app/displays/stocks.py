@@ -68,6 +68,11 @@ class StockDisplay(BaseDisplay):
         else:
             self.logger.warning("Stock data refresh skipped: no data returned")
 
+    def reset_scroll(self):
+        """Start the current ticker offscreen to the right for a fresh cycle."""
+        self.scroll_x = self.display_width
+        self.last_scroll_update = time.monotonic()
+
     def _current_text_width(self, font_small, font_large):
         if not self.stock_data_table:
             return 0

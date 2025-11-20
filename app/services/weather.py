@@ -68,17 +68,19 @@ class Weather:
             return self._forecast_cache[:days]
 
         payload = response.json()
+        local_tz = datetime.now().astimezone().tzinfo
         entries = payload.get("list") or []
         grouped = defaultdict(list)
         for entry in entries:
             dt_value = entry.get("dt")
             if dt_value is None:
                 continue
-            entry_time = datetime.utcfromtimestamp(dt_value)
+            utc_time = datetime.utcfromtimestamp(dt_value)
+            entry_time = utc_time.astimezone(local_tz) if local_tz else utc_time
             grouped[entry_time.date()].append(entry)
 
         forecasts = []
-        today = datetime.utcnow().date()
+        today = datetime.now(local_tz).date() if local_tz else datetime.utcnow().date()
         future_dates = [
             date_key for date_key in sorted(grouped.keys()) if date_key > today
         ]

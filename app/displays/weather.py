@@ -131,14 +131,16 @@ class WeatherDisplay(BaseDisplay):
             description = (weather[0].get("description") or "").strip()
         if description:
             condition_text = self._format_condition_text(description)
-            message = f"{condition_text} in {self.city}"
+            message = condition_text
         else:
-            message = f"{self.city} weather report"
+            message = "Weather report"
         if message != self.marquee_message:
             self.marquee_message = message
             self.marquee_x = float(self.display_width)
 
         scroll_width = self._measure_text(font_small, self.marquee_message)
+        if scroll_width <= 0:
+            return True
         self.draw_text(
             canvas,
             font_small,
@@ -148,8 +150,11 @@ class WeatherDisplay(BaseDisplay):
             self.marquee_message,
         )
         self.marquee_x -= self.scroll_speed
-        if self.marquee_x + scroll_width < 0:
+        finished = self.marquee_x + scroll_width < 0
+        if finished:
+            # Reset position for the next cycle
             self.marquee_x = float(self.display_width)
+        return finished
 
     def _get_icon(self, icon_code):
         if not icon_code:

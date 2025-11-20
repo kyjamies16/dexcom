@@ -154,6 +154,8 @@ class DisplayManager:
             schedule.run_pending()
 
     def _display_stock_cycle(self, font_small, font_large):
+        # Ensure ticker starts from the right edge each cycle
+        self.stock_display.reset_scroll()
         now_monotonic = time.monotonic()
         idle_elapsed = now_monotonic - getattr(
             self.stock_display, "last_scroll_update", now_monotonic
@@ -210,7 +212,9 @@ class DisplayManager:
         frame_delay = 0.06
         for panel_type, duration in panels:
             cycle_end = time.monotonic() + max(duration, 5)
-            while time.monotonic() < cycle_end:
+            while True:
+                if panel_type != "marquee" and time.monotonic() >= cycle_end:
+                    break
                 canvas = self.matrix.CreateFrameCanvas()
                 if panel_type == "current":
                     self.display_text(
@@ -233,7 +237,10 @@ class DisplayManager:
                         graphics.Color(200, 120, 0),
                         format_display_datetime(),
                     )
-                    self.weather_display.render_marquee(canvas, font_small)
+                    finished = self.weather_display.render_marquee(canvas, font_small)
+                    if finished:
+                        canvas = self.matrix.SwapOnVSync(canvas)
+                        break
                 else:
                     self.weather_display.render_forecast(canvas, font_small)
                 canvas = self.matrix.SwapOnVSync(canvas)
