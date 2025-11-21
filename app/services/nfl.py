@@ -1,9 +1,9 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timezone, time as dtime
 from typing import Dict, Optional
 
 import requests
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 TeamLogoInfo = Dict[str, str]
 
@@ -17,22 +17,61 @@ class NFLService:
         team_abbr: str = "IND",
         team_name: str = "Colts",
         team_timezone: str = "America/Chicago",
+        schedule_source_tz: str = "America/New_York",
     ):
         self.team_id = team_id
         self.team_abbr = team_abbr
         self.team_name = team_name
         self.team_timezone = team_timezone
+        self.schedule_source_tz = schedule_source_tz
         self.logger = logging.getLogger(__name__)
         self.schedule_url = (
             f"https://site.web.api.espn.com/apis/v2/sports/football/nfl/teams/{team_id}/schedule"
         )
 
-    def _get_tz(self) -> Optional[ZoneInfo]:
+    def _resolve_tz(self, tz_name: str) -> Optional[ZoneInfo]:
+        alias_map = {
+            "america/chicago": "US/Central",
+            "america/new_york": "US/Eastern",
+            "america/denver": "US/Mountain",
+            "america/los_angeles": "US/Pacific",
+        }
+        tz_candidates = [tz_name, alias_map.get(tz_name.lower()) if tz_name else None]
+        for tz_name in (tz for tz in tz_candidates if tz):
+            try:
+                return ZoneInfo(tz_name)
+            except ZoneInfoNotFoundError:
+                continue
+
+        # Fall back to dateutil if tzdata is missing in the runtime
         try:
-            return ZoneInfo(self.team_timezone)
+            from dateutil import tz  # type: ignore
+
+            for tz_name in (tz for tz in tz_candidates if tz):
+                candidate = tz.gettz(tz_name)
+                if candidate:
+                    return candidate
         except Exception:
-            self.logger.warning("Invalid timezone %s; using UTC", self.team_timezone)
-            return None
+            pass
+
+        return None
+
+    def _get_tz(self) -> Optional[ZoneInfo]:
+        resolved = self._resolve_tz(self.team_timezone)
+        if resolved:
+            return resolved
+        self.logger.warning("Timezone %s unavailable; using UTC", self.team_timezone)
+        return timezone.utc
+
+    def _get_source_tz(self) -> Optional[ZoneInfo]:
+        resolved = self._resolve_tz(self.schedule_source_tz)
+        if not resolved:
+            self.logger.warning(
+                "Schedule source timezone %s unavailable; using UTC",
+                self.schedule_source_tz,
+            )
+            return timezone.utc
+        return resolved
 
     def get_next_game(self) -> Optional[Dict[str, str]]:
         """Return opponent and kickoff info for the next upcoming game."""
@@ -46,8 +85,14 @@ class NFLService:
         try:
             resp = requests.get(self.schedule_url, timeout=10)
             resp.raise_for_status()
+        except requests.HTTPError as exc:
+            status = exc.response.status_code if exc.response else None
+            self.logger.warning(
+                "Failed to fetch NFL schedule (status %s); using fallback", status or "unknown"
+            )
+            return None
         except requests.RequestException as exc:
-            self.logger.error("Failed to fetch NFL schedule: %s", exc)
+            self.logger.warning("Failed to fetch NFL schedule: %s", exc)
             return None
 
         payload = resp.json()
@@ -175,16 +220,29 @@ class NFLService:
         opponent_nickname = nick_lookup.get(opponent_id, opponent_name)
 
         kickoff_dt = next_game.get("game_date")
+        gametime_raw = next_game.get("gametime") or next_game.get("game_time") or next_game.get(
+            "start_time"
+        )
         kickoff_str = "TBD"
         tzinfo = self._get_tz()
+        source_tz = self._get_source_tz()
         try:
             if pd.notnull(kickoff_dt):
                 kickoff_dt = kickoff_dt.to_pydatetime()
+                if gametime_raw:
+                    try:
+                        parsed_time = pd.to_datetime(str(gametime_raw)).time()
+                        kickoff_dt = datetime.combine(kickoff_dt.date(), parsed_time)
+                    except Exception:
+                        pass
+                elif kickoff_dt.hour == 0 and kickoff_dt.minute == 0:
+                    # Schedules without time default to midnight; assume noon local instead.
+                    kickoff_dt = datetime.combine(kickoff_dt.date(), dtime(hour=12))
+                if kickoff_dt.tzinfo is None:
+                    kickoff_dt = kickoff_dt.replace(tzinfo=source_tz or timezone.utc)
                 if tzinfo:
                     kickoff_dt = kickoff_dt.astimezone(tzinfo)
-                    kickoff_str = kickoff_dt.strftime("%a %I:%M %p").lstrip("0")
-                else:
-                    kickoff_str = kickoff_dt.strftime("%a %I:%M %p UTC").lstrip("0")
+                kickoff_str = kickoff_dt.strftime("%a %I:%M %p %Z").lstrip("0")
         except Exception:
             kickoff_str = "TBD"
 

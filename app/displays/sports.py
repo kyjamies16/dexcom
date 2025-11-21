@@ -9,6 +9,42 @@ from ..services.nfl import NFLService
 from .base import BaseDisplay
 
 
+LOGO_ABBR_ALIASES = {
+    "ari": ["cardinals", "arizona"],
+    "atl": ["falcons", "atlanta"],
+    "bal": ["ravens", "baltimore"],
+    "buf": ["bills", "buffalo"],
+    "car": ["panthers", "carolina"],
+    "chi": ["bears", "chicago"],
+    "cin": ["bengals", "cincinnati"],
+    "cle": ["browns", "cleveland"],
+    "dal": ["cowboys", "dallas"],
+    "den": ["broncos", "denver"],
+    "det": ["lions", "detroit"],
+    "gb": ["packers", "greenbay", "green_bay"],
+    "hou": ["texans", "houston"],
+    "ind": ["colts", "indianapolis"],
+    "jax": ["jaguars", "jacksonville"],
+    "kc": ["chiefs", "kansascity", "kansas_city", "kansas-city"],
+    "lv": ["raiders", "lasvegas", "las_vegas"],
+    "lac": ["chargers", "losangeles", "los_angeles"],
+    "lar": ["rams", "losangeles", "los_angeles"],
+    "mia": ["dolphins", "miami"],
+    "min": ["vikings", "minnesota"],
+    "ne": ["patriots", "newengland", "new_england"],
+    "no": ["saints", "neworleans", "new_orleans"],
+    "nyg": ["giants", "newyork", "new_york"],
+    "nyj": ["jets", "newyork", "new_york"],
+    "phi": ["eagles", "philadelphia"],
+    "pit": ["steelers", "pittsburgh"],
+    "sf": ["49ers", "niners", "sanfrancisco", "san_francisco"],
+    "sea": ["seahawks", "seattle"],
+    "tb": ["buccaneers", "bucs", "tampa", "tampabay", "tampa_bay"],
+    "ten": ["titans", "tennessee"],
+    "wsh": ["commanders", "washington"],
+}
+
+
 class SportsDisplay(BaseDisplay):
     def __init__(self, config):
         team_id = int(config.get("NFL", "team_id", fallback="11"))
@@ -158,6 +194,7 @@ class SportsDisplay(BaseDisplay):
             search_terms.append(safe_abbr)
         if len(name_tokens) > 1:
             search_terms.append("".join(name_tokens))
+        search_terms.extend(LOGO_ABBR_ALIASES.get(safe_abbr, []))
         best_path = None
         for path in self.logos_dir.iterdir():
             if not path.is_file() or path.suffix.lower() != ".png":
