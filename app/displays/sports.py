@@ -65,13 +65,27 @@ class SportsDisplay(BaseDisplay):
         self.config = config
         env_name = config.get("Environment", "name", fallback="prod").lower()
         custom_root = config.get("NFL", "logos_root", fallback="").strip()
+        base_dir = None
         if custom_root:
             base_dir = Path(custom_root)
+            self.logger.info("Using custom NFL logo root: %s", base_dir)
         elif env_name == "prod":
             base_dir = Path("/raspberry_pi_led/app")
+            self.logger.info("Using prod NFL logo root: %s", base_dir)
         else:
             base_dir = Path(__file__).resolve().parents[1]
-        self.logos_dir = base_dir / "assets" / "nfl_logos"
+
+        logos_dir = base_dir / "assets" / "nfl_logos"
+        if not logos_dir.exists():
+            fallback_dir = Path(__file__).resolve().parents[1] / "assets" / "nfl_logos"
+            self.logger.warning(
+                "Logos directory %s not found; falling back to %s",
+                logos_dir,
+                fallback_dir,
+            )
+            logos_dir = fallback_dir
+
+        self.logos_dir = logos_dir
         self.team_lookup = {
             "12": {"abbr": "KC", "nickname": "Chiefs", "name": "Kansas City Chiefs"},
             "11": {"abbr": "IND", "nickname": "Colts", "name": "Indianapolis Colts"},
