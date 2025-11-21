@@ -172,9 +172,10 @@ class DisplayManager:
             self.stock_display.fast_forward_scroll(idle_elapsed, font_small, font_large)
         cycle_end = time.monotonic() + self.stock_cycle_duration
         frame_delay = 0.1
+        canvas = self.matrix.CreateFrameCanvas()
 
         while time.monotonic() < cycle_end:
-            canvas = self.matrix.CreateFrameCanvas()
+            canvas.Clear()
             if not self.stock_display.stock_data_table:
                 self.logger.info(
                     "Stock data unavailable; displaying placeholder message"
@@ -219,11 +220,12 @@ class DisplayManager:
         ]
         frame_delay = 0.06
         for panel_type, duration in panels:
+            canvas = self.matrix.CreateFrameCanvas()
             cycle_end = time.monotonic() + max(duration, 5)
             while True:
                 if panel_type != "marquee" and time.monotonic() >= cycle_end:
                     break
-                canvas = self.matrix.CreateFrameCanvas()
+                canvas.Clear()
                 if panel_type == "current":
                     self.display_text(
                         canvas,
@@ -246,12 +248,11 @@ class DisplayManager:
                         format_display_datetime(),
                     )
                     finished = self.weather_display.render_marquee(canvas, font_small)
-                    if finished:
-                        canvas = self.matrix.SwapOnVSync(canvas)
-                        break
                 else:
                     self.weather_display.render_forecast(canvas, font_small)
                 canvas = self.matrix.SwapOnVSync(canvas)
+                if panel_type == "marquee" and finished:
+                    break
                 time.sleep(frame_delay)
                 schedule.run_pending()
 

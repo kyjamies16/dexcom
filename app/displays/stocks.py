@@ -19,7 +19,6 @@ class StockDisplay(BaseDisplay):
         self.stocks = [Stock(self.api_key, symbol) for symbol in self.stock_symbols]
         self.current_stock_index = 0
         self.logger = logger
-        logging.basicConfig(level=logging.INFO)
         self.request_interval = float(config["Stock"].get("request_interval_seconds", 12))
         repo_root = Path(__file__).resolve().parents[2]
         self.data_file = repo_root / "data" / "stock_data.json"
@@ -134,7 +133,8 @@ class StockDisplay(BaseDisplay):
         self.current_stock_index %= len(self.stock_data_table)
         stock_data = self.stock_data_table[self.current_stock_index]
         self.clear_canvas(canvas)
-        self.logger.info(f"Displaying stock info: {stock_data}")
+        if self.logger.isEnabledFor(logging.DEBUG):
+            self.logger.debug("Displaying stock info: %s", stock_data)
         
         # Display current date and time at the top of the display
         self.draw_text(canvas, font_small, 2, 8, graphics.Color(255, 165, 0), format_display_datetime())

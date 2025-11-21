@@ -2,17 +2,11 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from PIL import Image, ImageDraw
+from PIL import Image
 
 from ..matrix.helper import graphics
 from ..services.nfl import NFLService
 from .base import BaseDisplay
-
-
-COLTS_BLUE = (0, 44, 95)
-COLTS_WHITE = (240, 240, 240)
-CHIEFS_RED = (181, 0, 16)
-CHIEFS_GOLD = (255, 184, 28)
 
 
 class SportsDisplay(BaseDisplay):
@@ -34,34 +28,55 @@ class SportsDisplay(BaseDisplay):
         self.team_name = team_name
         self.config = config
         self.logos_dir = Path(__file__).resolve().parents[1] / "assets" / "nfl_logos"
+        self.team_lookup = {
+            "12": {"abbr": "KC", "nickname": "Chiefs", "name": "Kansas City Chiefs"},
+            "11": {"abbr": "IND", "nickname": "Colts", "name": "Indianapolis Colts"},
+        }
 
     def display(self, canvas, font_large, font_small):
         self.clear_canvas(canvas)
 
-        # Prefer live schedule; fall back to optional manual override
+        # Prefer live schedule; fall back to config overrides
         game = self.service.get_next_game()
         if not game:
-            game = {
-                "opponent_abbr": self.config.get("NFL", "opponent_abbr", fallback=""),
-                "opponent_name": self.config.get("NFL", "opponent_name", fallback=""),
-                "home": self.config.getboolean("NFL", "home", fallback=True),
-                "kickoff": self.config.get("NFL", "kickoff_local", fallback="TBD"),
-                "venue": self.config.get("NFL", "venue", fallback=""),
-            }
-        if not game:
-            self.draw_text(
-                canvas,
-                font_small,
-                2,
-                16,
-                graphics.Color(255, 255, 255),
-                f"{self.team_abbr} schedule TBD",
-            )
-            return
+            self.logger.warning("No live NFL game found; using config fallback.")
+            game = {}
 
-        home_logo = self._get_logo_image(self.team_name, self.team_abbr)
+        opponent_id = game.get("opponent_id")
+        opponent_name = game.get("opponent_name") or self.config.get(
+            "NFL", "opponent_name", fallback=""
+        )
+        opponent_nickname = game.get("opponent_nickname") or self.config.get(
+            "NFL", "opponent_nickname", fallback=""
+        )
+        opponent_abbr = game.get("opponent_abbr") or self.config.get(
+            "NFL", "opponent_abbr", fallback=""
+        )
+
+        # Enrich from local team lookup by id if present
+        if opponent_id and opponent_id in self.team_lookup:
+            info = self.team_lookup[opponent_id]
+            opponent_abbr = opponent_abbr or info.get("abbr", "")
+            opponent_name = opponent_name or info.get("name", "")
+            opponent_nickname = opponent_nickname or info.get("nickname", "")
+
+        if not opponent_nickname and opponent_name:
+            tokens = opponent_name.split()
+            opponent_nickname = tokens[-1] if tokens else opponent_name
+
+        if not opponent_abbr and opponent_nickname:
+            opponent_abbr = opponent_nickname[:3].upper()
+        if not opponent_abbr:
+            self.logger.warning("Opponent abbreviation missing; logo lookup may fail.")
+
+        if not opponent_name:
+            opponent_name = "Opponent"
+        if not opponent_nickname:
+            opponent_nickname = opponent_name
+
+        home_logo = self._get_logo_image(self.team_name, self.team_abbr, nickname=self.team_name)
         opp_logo = self._get_logo_image(
-            game.get("opponent_name", ""), game.get("opponent_abbr", "")
+            opponent_name, opponent_abbr, nickname=opponent_nickname
         )
 
         left_x = 2
@@ -87,7 +102,7 @@ class SportsDisplay(BaseDisplay):
         )
 
         # Show kickoff info
-        kickoff = game.get("kickoff", "TBD")
+        kickoff = game.get("kickoff") or self.config.get("NFL", "kickoff_local", fallback="TBD")
         # Strip anything after "PM"/"AM" for brevity
         for marker in (" PM", " AM"):
             if marker in kickoff:
@@ -115,42 +130,34 @@ class SportsDisplay(BaseDisplay):
                 width += 6
         return width
 
-    def _get_logo_image(self, team_name: str, team_abbr: str) -> Optional[Image.Image]:
-        key = (team_name.lower().strip(), team_abbr.lower().strip())
+    def _get_logo_image(self, team_name: str, team_abbr: str, nickname: str = "") -> Optional[Image.Image]:
+        key = (team_name.lower().strip(), team_abbr.lower().strip(), nickname.lower().strip())
         if key in self.logo_cache:
             return self.logo_cache[key]
 
-        logo = self._load_logo_from_disk(team_name, team_abbr)
-        if logo:
-            self.logo_cache[key] = logo
-            return logo
-
-        # Fallback pixel art for Colts/Opponent if nothing found
-        if team_abbr.upper() == self.team_abbr.upper():
-            logo = self._build_colts_logo()
-        elif team_abbr.upper() == "KC":
-            logo = self._build_chiefs_logo()
-        elif team_abbr.upper() == "IND":
-            logo = self._build_colts_logo()
+        logo = self._load_logo_from_disk(team_name, team_abbr, nickname)
         if not logo:
-            self.logger.warning("Using fallback pixel logo for %s (%s)", team_name, team_abbr)
+            self.logger.warning("No logo found for %s (%s) in %s", team_name, team_abbr, self.logos_dir)
         self.logo_cache[key] = logo
         return logo
 
-    def _load_logo_from_disk(self, team_name: str, team_abbr: str) -> Optional[Image.Image]:
+    def _load_logo_from_disk(self, team_name: str, team_abbr: str, nickname: str) -> Optional[Image.Image]:
+        """Load a team logo PNG from app/assets/nfl_logos by matching abbreviation/name."""
         if not self.logos_dir.exists():
             return None
         safe_abbr = (team_abbr or "").lower()
         name_tokens = [tok for tok in (team_name or "").lower().replace("-", " ").split() if tok]
-        alias_map = {
-            "kc": ["chiefs", "kansascity", "kansascity", "kansas-city"],
-            "ind": ["colts", "indianapolis", "indy"],
-        }
         search_terms = []
+        # Prefer the nickname (e.g., chiefs.png, colts.png)
+        nick = nickname.lower().strip() if nickname else ""
+        if nick:
+            search_terms.append(nick)
+        if name_tokens:
+            search_terms.append(name_tokens[-1])
         if safe_abbr:
             search_terms.append(safe_abbr)
-            search_terms.extend(alias_map.get(safe_abbr, []))
-        search_terms.extend(["".join(name_tokens), *name_tokens])
+        if len(name_tokens) > 1:
+            search_terms.append("".join(name_tokens))
         best_path = None
         for path in self.logos_dir.iterdir():
             if not path.is_file() or path.suffix.lower() != ".png":
@@ -184,97 +191,3 @@ class SportsDisplay(BaseDisplay):
         ratio = target_height / float(img.height)
         target_width = max(1, int(img.width * ratio))
         return img.resize((target_width, target_height), Image.LANCZOS)
-
-    def _build_colts_logo(self) -> Optional[Image.Image]:
-        """Generate a compact Colts horseshoe (optimized for 64x32)."""
-        try:
-            size = 30
-            img = Image.new("RGB", (size, size), (0, 0, 0))
-            draw = ImageDraw.Draw(img)
-
-            outer = 2
-            inner = 9
-            stroke = 4
-
-            draw.arc(
-                [outer, outer, size - outer, size - outer],
-                start=210,
-                end=330,
-                fill=COLTS_BLUE,
-                width=stroke,
-            )
-            draw.arc(
-                [outer, outer, size - outer, size - outer],
-                start=30,
-                end=150,
-                fill=COLTS_BLUE,
-                width=stroke,
-            )
-
-            draw.rectangle([outer + 2, 10, outer + 6, size - 8], fill=COLTS_BLUE)
-            draw.rectangle([size - 8, 10, size - 4, size - 8], fill=COLTS_BLUE)
-
-            draw.ellipse(
-                [inner, inner, size - inner, size - inner],
-                fill=(0, 0, 0),
-            )
-
-            hole_r = 2
-            holes = [
-                (size // 2, outer + 6),
-                (size // 2, size - outer - 6),
-                (outer + 6, size // 2 - 4),
-                (outer + 6, size // 2 + 4),
-                (size - outer - 6, size // 2 - 4),
-                (size - outer - 6, size // 2 + 4),
-                (size // 2 - 7, size // 2),
-                (size // 2 + 7, size // 2),
-            ]
-            for x, y in holes:
-                draw.ellipse(
-                    [x - hole_r, y - hole_r, x + hole_r, y + hole_r],
-                    fill=COLTS_WHITE,
-                )
-
-            return img
-        except Exception as exc:
-            self.logger.warning("Failed to build Colts logo: %s", exc)
-            return None
-
-    def _build_chiefs_logo(self) -> Optional[Image.Image]:
-        """Generate a small Chiefs arrowhead style icon."""
-        try:
-            width, height = 30, 20
-            img = Image.new("RGB", (width, height), (0, 0, 0))
-            draw = ImageDraw.Draw(img)
-
-            points = [
-                (2, height // 2),
-                (8, 2),
-                (23, 2),
-                (27, height // 2),
-                (23, height - 2),
-                (8, height - 2),
-            ]
-            draw.polygon(points, fill=CHIEFS_RED, outline=CHIEFS_GOLD)
-
-            k_strokes = [
-                (10, 5, 12, 15),
-                (12, 10, 15, 12),
-                (12, 12, 15, 15),
-            ]
-            for coords in k_strokes:
-                draw.rectangle(coords, fill=CHIEFS_GOLD)
-
-            c_strokes = [
-                (17, 6, 22, 8),
-                (17, 8, 19, 14),
-                (17, 14, 22, 16),
-            ]
-            for coords in c_strokes:
-                draw.rectangle(coords, fill=CHIEFS_GOLD)
-
-            return img
-        except Exception as exc:
-            self.logger.warning("Failed to build Chiefs logo: %s", exc)
-            return None
