@@ -67,10 +67,11 @@ class SportsDisplay(BaseDisplay):
         custom_root = config.get("NFL", "logos_root", fallback="").strip()
         base_dir = None
         if custom_root:
-            base_dir = Path(custom_root)
+            base_dir = Path(custom_root).expanduser()
             self.logger.info("Using custom NFL logo root: %s", base_dir)
         elif env_name == "prod":
-            base_dir = Path("/raspberry_pi_led/app")
+            # Default Raspberry Pi install location for prod
+            base_dir = Path("/home/krjamies/raspberry_pi_led/app").expanduser()
             self.logger.info("Using prod NFL logo root: %s", base_dir)
         else:
             base_dir = Path(__file__).resolve().parents[1]

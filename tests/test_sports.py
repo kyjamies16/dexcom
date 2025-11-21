@@ -21,7 +21,7 @@ def make_config(env_name="prod", logos_root=""):
 
 
 def test_prod_env_prefers_rpi_logo_dir(monkeypatch):
-    expected_dir = Path("/raspberry_pi_led/app/assets/nfl_logos")
+    expected_dir = Path("/home/krjamies/raspberry_pi_led/app/assets/nfl_logos")
     fake_files = [
         expected_dir / "colts.png",
         expected_dir / "chiefs.png",
