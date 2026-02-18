@@ -1,14 +1,37 @@
+from typing import Optional
+
 from ..matrix.helper import graphics
 from ..services.weather import Weather
+from ..utils.cache import DataCache
 from .base import BaseDisplay
 
 
 class WeatherDisplay(BaseDisplay):
-    def __init__(self, config):
+    def __init__(
+        self,
+        config,
+        data_cache: Optional[DataCache] = None,
+        cache_ttls: Optional[dict] = None,
+    ):
         self.city = config["Weather"].get("city", "Austin")
-        cache_ttl = int(config["Weather"].get("cache_ttl_seconds", "600"))
         api_key = config["Weather"]["api_key"]
-        self.weather = Weather(api_key, city=self.city, cache_ttl_seconds=cache_ttl)
+        cache_ttls = cache_ttls or {}
+        current_ttl = int(
+            cache_ttls.get(
+                "weather_current",
+                config["Weather"].get("cache_ttl_seconds", "600"),
+            )
+        )
+        forecast_ttl = int(
+            cache_ttls.get("weather_forecast", config["Weather"].get("forecast_cache_ttl_seconds", "900"))
+        )
+        self.weather = Weather(
+            api_key,
+            city=self.city,
+            cache=data_cache,
+            current_ttl_seconds=current_ttl,
+            forecast_ttl_seconds=forecast_ttl,
+        )
         self.current_panel_duration = int(
             config["Weather"].get("current_panel_seconds", "15")
         )
@@ -26,8 +49,26 @@ class WeatherDisplay(BaseDisplay):
         self.marquee_message = ""
         self.marquee_x = float(self.display_width)
 
-    def render_current(self, canvas, font_large, font_small, font_mini):
-        weather_data = self.weather.get_current_weather()
+    def snapshot_current(self):
+        return self.weather.get_current_weather()
+
+    def snapshot_forecast(self, days: int = 3):
+        return self.weather.get_multi_day_forecast(days=days)
+
+    def marquee_signature(self, weather_data: Optional[dict]):
+        description = ""
+        if weather_data:
+            weather = weather_data.get("weather") or [{}]
+            description = (weather[0].get("description") or "").strip()
+        message = (
+            self._format_condition_text(description)
+            if description
+            else "Weather report"
+        )
+        return message
+
+    def render_current(self, canvas, font_large, font_small, font_mini, weather_data=None):
+        weather_data = weather_data or self.snapshot_current()
         if not weather_data:
             self.draw_text(
                 canvas, font_large, 16, 22, graphics.Color(255, 255, 255), "N/A"
@@ -73,8 +114,8 @@ class WeatherDisplay(BaseDisplay):
                 feels_text.upper(),
             )
 
-    def render_forecast(self, canvas, font_small):
-        forecast = self.weather.get_multi_day_forecast(days=3)
+    def render_forecast(self, canvas, font_small, forecast=None):
+        forecast = forecast or self.snapshot_forecast(days=3)
         if not forecast:
             last_refresh = self.weather.last_forecast_refresh() or "--:--"
             self.draw_text(
@@ -123,17 +164,9 @@ class WeatherDisplay(BaseDisplay):
             self.draw_text(canvas, font_small, high_x, 25, high_color, high_text)
             self.draw_text(canvas, font_small, low_x, 31, low_color, low_text)
 
-    def render_marquee(self, canvas, font_small):
-        weather_data = self.weather.get_current_weather()
-        description = ""
-        if weather_data:
-            weather = weather_data.get("weather") or [{}]
-            description = (weather[0].get("description") or "").strip()
-        if description:
-            condition_text = self._format_condition_text(description)
-            message = condition_text
-        else:
-            message = "Weather report"
+    def render_marquee(self, canvas, font_small, weather_data=None):
+        weather_data = weather_data or self.snapshot_current()
+        message = self.marquee_signature(weather_data)
         if message != self.marquee_message:
             self.marquee_message = message
             self.marquee_x = float(self.display_width)

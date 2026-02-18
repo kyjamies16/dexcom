@@ -1,0 +1,33 @@
+panel:
+  rows: 32
+  cols: 64
+  chain_length: 1
+  parallel: 1
+  hardware_mapping: adafruit-hat
+  gpio_slowdown: 6          # matches --led-slowdown-gpio
+  pwm_lsb_nanoseconds: 250
+  pwm_bits: 10
+  pwm_dither_bits: 1
+  brightness: 50
+  show_refresh: true
+
+cache_ttl_seconds:
+  glucose: 60
+  weather_current: 600
+  weather_forecast: 900
+  stocks: 300
+  sports: 900
+
+modes:
+  minimal:
+    features:
+      stocks: false
+      sports: false
+      weather: true
+      glucose: true
+  full:
+    features:
+      stocks: true
+      sports: true
+      weather: true
+      glucose: true

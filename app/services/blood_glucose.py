@@ -4,6 +4,8 @@ from typing import Optional
 
 from pydexcom import Dexcom, Region
 
+from ..utils.cache import DataCache
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,10 +28,14 @@ class Glucose:
         password: Optional[str],
         account_id: Optional[str] = None,
         region: Optional[str] = None,
+        cache_ttl_seconds: int = 60,
+        data_cache: Optional[DataCache] = None,
     ):
         self.high_value = 200
         self.low_value = 70
         self.dexcom: Optional[Dexcom] = None
+        self.cache = data_cache or DataCache(logger=logger)
+        self.cache_ttl_seconds = max(cache_ttl_seconds, 5)
 
         if not username or not password:
             logger.warning("Dexcom credentials missing; disabling glucose readings")
@@ -49,6 +55,14 @@ class Glucose:
     def get_glucose_reading(self):
         if not self.dexcom:
             return None
+        return self.cache.get(
+            "glucose:reading",
+            self._fetch_reading,
+            ttl_seconds=self.cache_ttl_seconds,
+            allow_stale=True,
+        )
+
+    def _fetch_reading(self):
         try:
             return self.dexcom.get_current_glucose_reading()
         except Exception as exc:

@@ -2,7 +2,7 @@ import logging
 import time
 from datetime import datetime, time as dtime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any, Dict, List
 
 import schedule
 
@@ -11,6 +11,8 @@ from .displays.weather import WeatherDisplay
 from .displays.glucose import GlucoseDisplay
 from .displays.stocks import StockDisplay
 from .displays.sports import SportsDisplay
+from .renderer import Renderer
+from .utils.cache import DataCache
 from .utils.datetime import format_display_datetime
 
 
@@ -18,32 +20,75 @@ class DisplayManager:
     def __init__(self, config):
         self.config = config
         self.logger = logging.getLogger(__name__)
-        self.weather_display = WeatherDisplay(config)
-        self.glucose_display = GlucoseDisplay(config)
-        self.stock_display = StockDisplay(config, auto_refresh=False)
-        self.sports_display = SportsDisplay(config)
-        self.display_index = 0
+        self.mode = config.get("Environment", "mode", fallback="full").lower()
+        self.cache = DataCache(logger=self.logger)
+        self.cache_ttls = {
+            "glucose": self._getint("CacheTTL", "glucose", 60),
+            "weather_current": self._getint("CacheTTL", "weather_current", 600),
+            "weather_forecast": self._getint("CacheTTL", "weather_forecast", 900),
+            "stocks": self._getint("CacheTTL", "stocks", 300),
+            "sports": self._getint("CacheTTL", "sports", 900),
+        }
+
+        self.features = {
+            "glucose": self._getbool("Features", "glucose", True),
+            "weather": self._getbool("Features", "weather", True),
+            "sports": self._getbool("Features", "sports", self.mode == "full"),
+            "stocks": self._getbool("Features", "stocks", self.mode == "full"),
+        }
+
         self.matrix = self.setup_matrix()
-        self.sleep_duration = 5  # Initial sleep duration
-        self.display_durations = [10, 10]
-        self.sports_duration = int(config.get("NFL", "panel_seconds", fallback="8"))
-        self.stock_cycle_duration = 30
-        self.stock_data_last_refresh: Optional[datetime] = None
+        self.renderer = Renderer(self.matrix, logger=self.logger)
+        self.display_index = 0
+        self.display_order: List[str] = [
+            name for name in ("glucose", "weather", "sports", "stocks") if self.features.get(name)
+        ]
+        if not self.display_order:
+            self.logger.warning("No displays enabled; enable features in config/CLI mode.")
+
+        # Panels
+        self.glucose_display: Optional[GlucoseDisplay] = None
+        self.weather_display: Optional[WeatherDisplay] = None
+        self.stock_display: Optional[StockDisplay] = None
+        self.sports_display: Optional[SportsDisplay] = None
+
+        if self.features["glucose"]:
+            self.glucose_display = GlucoseDisplay(
+                config,
+                data_cache=self.cache,
+                cache_ttl_seconds=self.cache_ttls["glucose"],
+            )
+        if self.features["weather"]:
+            self.weather_display = WeatherDisplay(
+                config,
+                data_cache=self.cache,
+                cache_ttls=self.cache_ttls,
+            )
+        if self.features["stocks"]:
+            self.stock_display = StockDisplay(
+                config,
+                auto_refresh=True,
+                data_cache=self.cache,
+                cache_ttl_seconds=self.cache_ttls["stocks"],
+            )
+        if self.features["sports"]:
+            self.sports_display = SportsDisplay(
+                config,
+                data_cache=self.cache,
+                cache_ttl_seconds=self.cache_ttls["sports"],
+            )
 
         self.market_close_time = dtime(16, 0)
         schedule.every().day.at(self.market_close_time.strftime("%H:%M")).do(
             self.fetch_stock_data_on_market_close
         )
 
-        if self.stock_display.stock_data_table:
-            self.logger.info(
-                "Loaded cached stock data for %d symbols",
-                len(self.stock_display.stock_data_table),
-            )
-        else:
-            self.logger.info(
-                "No cached stock data found; awaiting 4 PM refresh for live updates"
-            )
+        self.stock_cycle_duration = int(
+            config.get("Stock", "cycle_seconds", fallback="30")
+        )
+        self.glucose_duration = int(
+            config.get("Dexcom", "panel_seconds", fallback="10")
+        )
 
     def setup_matrix(self):
         options = RGBMatrixOptions()
@@ -96,21 +141,12 @@ class DisplayManager:
             options.gpio_slowdown = 2
 
         return RGBMatrix(options=options)
-          
-
-
-    def is_market_closed(self):
-        now = datetime.now().time()
-        market_close_time = dtime(16, 0)  # Assuming market closes at 4 PM
-        return now >= market_close_time
 
     def fetch_stock_data_on_market_close(self):
+        if not self.stock_display:
+            return
         self.logger.info("Triggering scheduled stock refresh at market close")
         self.stock_display.async_refresh_stock_data()
-        self.stock_data_last_refresh = datetime.now()
-
-    def display_text(self, canvas, font, x, y, color, text):
-        graphics.DrawText(canvas, font, x, y, color, text)
 
     def run(self):
         script_dir = Path(__file__).resolve().parent
@@ -125,43 +161,136 @@ class DisplayManager:
         font_mini.LoadFont(str(font_dir / "tom-thumb.bdf"))
 
         while True:
-            canvas = self.matrix.CreateFrameCanvas()
-            header_color = (
-                graphics.Color(200, 120, 0)
-                if self.display_index in (1, 2)
-                else graphics.Color(255, 165, 0)
-            )
-            self.display_text(canvas, font_small, 2, 8, header_color, format_display_datetime())
-
-            if self.display_index == 0:
-                # Display glucose data
-                self.glucose_display.display(canvas, font_large, font_small)
-                self.sleep_duration = self.display_durations[0]
-                self.display_index = 1
-                self.logger.info("Displaying glucose data")
-            elif self.display_index == 1:
-                self.logger.info("Displaying weather data")
-                self._display_weather_cycle(font_small, font_large, font_mini)
-                self.display_index = 2
-                continue
-            elif self.display_index == 2:
-                self.logger.info("Displaying sports data (Colts)")
-                self.sports_display.display(canvas, font_large, font_small)
-                self.sleep_duration = self.sports_duration
-                self.display_index = 3
-            else:
-                self._display_stock_cycle(font_small, font_large)
-                self.display_index = 0
+            if not self.display_order:
+                time.sleep(1)
+                schedule.run_pending()
                 continue
 
-            # Update the LED matrix
-            canvas = self.matrix.SwapOnVSync(canvas)
-            time.sleep(self.sleep_duration)  # Sleep for configured duration
+            panel = self.display_order[self.display_index % len(self.display_order)]
+            if panel == "glucose" and self.glucose_display:
+                self._render_glucose(font_small, font_large)
+            elif panel == "weather" and self.weather_display:
+                self._render_weather_cycle(font_small, font_large, font_mini)
+            elif panel == "sports" and self.sports_display:
+                self._render_sports(font_small, font_large)
+            elif panel == "stocks" and self.stock_display:
+                self._render_stock_cycle(font_small, font_large)
 
-            # Run scheduled tasks
+            self.display_index = (self.display_index + 1) % len(self.display_order)
             schedule.run_pending()
 
-    def _display_stock_cycle(self, font_small, font_large):
+    def _draw_header(self, canvas, font_small, text: str, highlight: bool = False):
+        color = graphics.Color(200, 120, 0) if highlight else graphics.Color(255, 165, 0)
+        canvas.Clear()
+        canvas = canvas or self.matrix.CreateFrameCanvas()
+        self._draw_header_text(canvas, font_small, text, color)
+
+    def _draw_header_text(self, canvas, font_small, text: str, color):
+        self._safe_draw_text(canvas, font_small, 2, 8, color, text)
+
+    def _safe_draw_text(self, canvas, font, x, y, color, text):
+        return graphics.DrawText(canvas, font, x, y, color, text)
+
+    def _sleep_with_pending(self, seconds: float):
+        end = time.monotonic() + max(seconds, 0)
+        while time.monotonic() < end:
+            time.sleep(min(0.5, end - time.monotonic()))
+            schedule.run_pending()
+
+    # -------------------------
+    # Panel renderers
+    # -------------------------
+    def _render_glucose(self, font_small, font_large):
+        header_text = format_display_datetime()
+        reading = self.glucose_display.snapshot() if self.glucose_display else None
+        signature = ("glucose", header_text, reading and reading.get("value"), reading and reading.get("trend"))
+
+        def draw(canvas):
+            canvas.Clear()
+            self._draw_header_text(canvas, font_small, header_text, graphics.Color(255, 165, 0))
+            self.glucose_display.display(canvas, font_large, font_small, reading=reading)
+
+        self.renderer.render("glucose", signature, draw)
+        self._sleep_with_pending(self.glucose_duration)
+
+    def _render_sports(self, font_small, font_large):
+        header_text = format_display_datetime()
+        game = self.sports_display.snapshot() if self.sports_display else {}
+        signature = (
+            "sports",
+            header_text,
+            game.get("opponent_abbr"),
+            game.get("kickoff"),
+        )
+
+        def draw(canvas):
+            canvas.Clear()
+            self._draw_header_text(canvas, font_small, header_text, graphics.Color(200, 120, 0))
+            self.sports_display.display(canvas, font_large, font_small)
+
+        self.renderer.render("sports", signature, draw)
+        self._sleep_with_pending(int(self.config.get("NFL", "panel_seconds", fallback="8")))
+
+    def _render_weather_cycle(self, font_small, font_large, font_mini):
+        header_text = format_display_datetime()
+        weather_data = self.weather_display.snapshot_current() if self.weather_display else None
+        forecast = self.weather_display.snapshot_forecast() if self.weather_display else None
+
+        # Marquee (animated) redraws until finished or duration elapsed
+        marquee_end = time.monotonic() + max(self.weather_display.marquee_panel_duration, 5)
+        finished = False
+        while time.monotonic() < marquee_end:
+            message = self.weather_display.marquee_signature(weather_data)
+            marquee_sig = (
+                "weather-marquee",
+                header_text,
+                message,
+                int(self.weather_display.marquee_x),
+            )
+
+            def draw(canvas):
+                nonlocal finished
+                canvas.Clear()
+                self._draw_header_text(canvas, font_small, header_text, graphics.Color(200, 120, 0))
+                finished = self.weather_display.render_marquee(canvas, font_small, weather_data)
+
+            self.renderer.render("weather-marquee", marquee_sig, draw, force=True)
+            if finished:
+                break
+            time.sleep(0.06)
+            schedule.run_pending()
+
+        # Current conditions (static)
+        current_sig = (
+            "weather-current",
+            header_text,
+            self._current_signature(weather_data),
+        )
+
+        def draw_current(canvas):
+            canvas.Clear()
+            self._draw_header_text(canvas, font_small, header_text, graphics.Color(200, 120, 0))
+            self.weather_display.render_current(
+                canvas, font_large, font_small, font_mini, weather_data
+            )
+
+        self.renderer.render("weather-current", current_sig, draw_current)
+        self._sleep_with_pending(self.weather_display.current_panel_duration)
+
+        # Forecast (static)
+        forecast_sig = ("weather-forecast", header_text, self._forecast_signature(forecast))
+
+        def draw_forecast(canvas):
+            canvas.Clear()
+            self._draw_header_text(canvas, font_small, header_text, graphics.Color(200, 120, 0))
+            self.weather_display.render_forecast(canvas, font_small, forecast)
+
+        self.renderer.render("weather-forecast", forecast_sig, draw_forecast)
+        self._sleep_with_pending(self.weather_display.forecast_panel_duration)
+
+    def _render_stock_cycle(self, font_small, font_large):
+        if not self.stock_display:
+            return
         # Ensure ticker starts from the right edge each cycle
         self.stock_display.reset_scroll()
         now_monotonic = time.monotonic()
@@ -171,90 +300,64 @@ class DisplayManager:
         if idle_elapsed > 0:
             self.stock_display.fast_forward_scroll(idle_elapsed, font_small, font_large)
         cycle_end = time.monotonic() + self.stock_cycle_duration
-        frame_delay = 0.1
-        canvas = self.matrix.CreateFrameCanvas()
+        frame_delay = max(self.stock_display.frame_interval, 0.05)
 
         while time.monotonic() < cycle_end:
-            canvas.Clear()
-            if not self.stock_display.stock_data_table:
-                self.logger.info(
-                    "Stock data unavailable; displaying placeholder message"
-                )
-                self.display_text(
-                    canvas,
-                    font_small,
-                    2,
-                    8,
-                    graphics.Color(255, 165, 0),
-                    format_display_datetime(),
-                )
-                self.display_text(
-                    canvas,
-                    font_small,
-                    2,
-                    20,
-                    graphics.Color(255, 255, 255),
-                    "Stocks unavailable",
-                )
-                canvas = self.matrix.SwapOnVSync(canvas)
-                time.sleep(1)
-                schedule.run_pending()
-                continue
-
-            current_index = (
-                self.stock_display.current_stock_index
-                % len(self.stock_display.stock_data_table)
+            signature = (
+                "stocks",
+                self.stock_display.current_stock_index,
+                int(self.stock_display.scroll_x),
+                len(self.stock_display.stock_data_table or []),
             )
-            self.logger.info("Displaying stock data for index %d", current_index)
-            self.stock_display.display(canvas, font_small, font_large)
-            canvas = self.matrix.SwapOnVSync(canvas)
+
+            def draw(canvas):
+                self.stock_display.display(canvas, font_small, font_large)
+
+            self.renderer.render("stocks", signature, draw, force=True)
             time.sleep(frame_delay)
             schedule.run_pending()
 
+    # -------------------------
+    # Signatures
+    # -------------------------
+    def _current_signature(self, weather_data: Optional[Dict[str, Any]]):
+        if not weather_data:
+            return None
+        main = weather_data.get("main", {})
+        weather = (weather_data.get("weather") or [{}])[0]
+        return (
+            int(main.get("temp", 0)),
+            int(main.get("feels_like", 0)),
+            weather.get("icon"),
+            weather.get("description"),
+        )
 
-    def _display_weather_cycle(self, font_small, font_large, font_mini):
-        panels = [
-            ("marquee", self.weather_display.marquee_panel_duration),
-            ("current", self.weather_display.current_panel_duration),
-            ("forecast", self.weather_display.forecast_panel_duration),
-        ]
-        frame_delay = 0.06
-        for panel_type, duration in panels:
-            canvas = self.matrix.CreateFrameCanvas()
-            cycle_end = time.monotonic() + max(duration, 5)
-            while True:
-                if panel_type != "marquee" and time.monotonic() >= cycle_end:
-                    break
-                canvas.Clear()
-                if panel_type == "current":
-                    self.display_text(
-                        canvas,
-                        font_small,
-                        2,
-                        8,
-                        graphics.Color(200, 120, 0),
-                        format_display_datetime(),
-                    )
-                    self.weather_display.render_current(
-                        canvas, font_large, font_small, font_mini
-                    )
-                elif panel_type == "marquee":
-                    self.display_text(
-                        canvas,
-                        font_small,
-                        2,
-                        8,
-                        graphics.Color(200, 120, 0),
-                        format_display_datetime(),
-                    )
-                    finished = self.weather_display.render_marquee(canvas, font_small)
-                else:
-                    self.weather_display.render_forecast(canvas, font_small)
-                canvas = self.matrix.SwapOnVSync(canvas)
-                if panel_type == "marquee" and finished:
-                    break
-                time.sleep(frame_delay)
-                schedule.run_pending()
+    def _forecast_signature(self, forecast: Optional[List[Dict[str, Any]]]):
+        if not forecast:
+            return None
+        simplified = []
+        for day in forecast:
+            simplified.append(
+                (
+                    day.get("day"),
+                    int(day.get("high", 0)),
+                    int(day.get("low", 0)),
+                    day.get("icon"),
+                )
+        )
+        return tuple(simplified)
 
+    # -------------------------
+    # Helpers
+    # -------------------------
+    def _getbool(self, section: str, option: str, default: bool) -> bool:
+        try:
+            return self.config.getboolean(section, option, fallback=default)
+        except Exception:
+            return default
 
-
+    def _getint(self, section: str, option: str, default: int) -> int:
+        try:
+            return self.config.getint(section, option, fallback=default)
+        except Exception:
+            return default

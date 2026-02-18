@@ -5,6 +5,8 @@ from typing import Dict, Optional
 import requests
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from ..utils.cache import DataCache
+
 TeamLogoInfo = Dict[str, str]
 
 
@@ -18,6 +20,8 @@ class NFLService:
         team_name: str = "Colts",
         team_timezone: str = "America/Chicago",
         schedule_source_tz: str = "America/New_York",
+        cache_ttl_seconds: int = 900,
+        cache: Optional[DataCache] = None,
     ):
         self.team_id = team_id
         self.team_abbr = team_abbr
@@ -28,6 +32,8 @@ class NFLService:
         self.schedule_url = (
             f"https://site.web.api.espn.com/apis/v2/sports/football/nfl/teams/{team_id}/schedule"
         )
+        self.cache = cache or DataCache(logger=self.logger)
+        self.cache_ttl_seconds = max(cache_ttl_seconds, 120)
 
     def _resolve_tz(self, tz_name: str) -> Optional[ZoneInfo]:
         alias_map = {
@@ -75,6 +81,14 @@ class NFLService:
 
     def get_next_game(self) -> Optional[Dict[str, str]]:
         """Return opponent and kickoff info for the next upcoming game."""
+        return self.cache.get(
+            f"nfl:next_game:{self.team_id}",
+            self._get_next_game_uncached,
+            ttl_seconds=self.cache_ttl_seconds,
+            allow_stale=True,
+        )
+
+    def _get_next_game_uncached(self):
         game = self._fetch_espn_next_game()
         if game:
             return game

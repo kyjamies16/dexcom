@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ..services.stocks import Stock
 from ..matrix.helper import graphics
+from ..utils.cache import DataCache
 from ..utils.datetime import format_display_datetime
 from .base import BaseDisplay
 
@@ -13,10 +14,12 @@ logger = logging.getLogger(__name__)
 
 
 class StockDisplay(BaseDisplay):
-    def __init__(self, config, auto_refresh: bool = True):
+    def __init__(self, config, auto_refresh: bool = True, data_cache: DataCache = None, cache_ttl_seconds: int = 300):
         self.api_key = config["Stock"]["api_key"]
         self.stock_symbols = ['COST','TSM', 'LEN', 'GOOG', 'VOO', 'CAT', 'DXCM', 'MSFT', 'AXP']
-        self.stocks = [Stock(self.api_key, symbol) for symbol in self.stock_symbols]
+        self.cache = data_cache or DataCache(logger=logger)
+        self.cache_ttl_seconds = cache_ttl_seconds
+        self.stocks = [Stock(self.api_key, symbol, cache=self.cache, cache_ttl_seconds=self.cache_ttl_seconds) for symbol in self.stock_symbols]
         self.current_stock_index = 0
         self.logger = logger
         self.request_interval = float(config["Stock"].get("request_interval_seconds", 12))

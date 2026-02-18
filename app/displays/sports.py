@@ -6,6 +6,7 @@ from PIL import Image
 
 from ..matrix.helper import graphics
 from ..services.nfl import NFLService
+from ..utils.cache import DataCache
 from .base import BaseDisplay
 
 
@@ -46,7 +47,7 @@ LOGO_ABBR_ALIASES = {
 
 
 class SportsDisplay(BaseDisplay):
-    def __init__(self, config):
+    def __init__(self, config, data_cache: Optional[DataCache] = None, cache_ttl_seconds: int = 900):
         team_id = int(config.get("NFL", "team_id", fallback="11"))
         team_abbr = config.get("NFL", "team_abbr", fallback="IND")
         team_name = config.get("NFL", "team_name", fallback="Indianapolis Colts")
@@ -57,6 +58,8 @@ class SportsDisplay(BaseDisplay):
             team_abbr=team_abbr,
             team_name=team_name,
             team_timezone=team_timezone,
+            cache=data_cache,
+            cache_ttl_seconds=cache_ttl_seconds,
         )
         self.logger = logging.getLogger(__name__)
         self.logo_cache = {}
@@ -91,6 +94,9 @@ class SportsDisplay(BaseDisplay):
             "12": {"abbr": "KC", "nickname": "Chiefs", "name": "Kansas City Chiefs"},
             "11": {"abbr": "IND", "nickname": "Colts", "name": "Indianapolis Colts"},
         }
+
+    def snapshot(self):
+        return self.service.get_next_game() or {}
 
     def display(self, canvas, font_large, font_small):
         self.clear_canvas(canvas)
