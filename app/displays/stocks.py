@@ -97,7 +97,8 @@ class StockDisplay(BaseDisplay):
         text_width = self._current_text_width(font_small, font_large)
         for _ in range(steps):
             self.scroll_x -= pixels_per_step
-            if text_width and self.scroll_x + text_width < 0:
+            # Treat reaching 0 or less as fully scrolled off the left edge; use <= to avoid "stuck at edge" cases
+            if text_width and self.scroll_x + text_width <= 0:
                 self.scroll_x = self.display_width
                 self.current_stock_index = (
                     self.current_stock_index + 1
@@ -189,8 +190,8 @@ class StockDisplay(BaseDisplay):
 
             text_width = symbol_width + padding + colon_width + percent_width
             self.scroll_x -= max(self.scroll_speed, 1)
-
-            if self.scroll_x + text_width < 0:
+            # Use <= to ensure we reset once fully offscreen and avoid 1-pixel stuck states
+            if text_width and self.scroll_x + text_width <= 0:
                 self.scroll_x = self.display_width
                 self.current_stock_index = (
                     self.current_stock_index + 1

@@ -17,11 +17,13 @@ from .utils.datetime import format_display_datetime
 
 
 class DisplayManager:
+    """Central orchestrator: selects enabled panels, caches data, and redraws only when content changes."""
     def __init__(self, config):
         self.config = config
         self.logger = logging.getLogger(__name__)
         self.mode = config.get("Environment", "mode", fallback="full").lower()
-        self.cache = DataCache(logger=self.logger)
+        self.cache = DataCache(logger=self.logger)  # shared in-memory cache for all data sources
+        # Per-source TTLs (fall back to defaults if missing)
         self.cache_ttls = {
             "glucose": self._getint("CacheTTL", "glucose", 60),
             "weather_current": self._getint("CacheTTL", "weather_current", 600),
@@ -30,6 +32,7 @@ class DisplayManager:
             "sports": self._getint("CacheTTL", "sports", 900),
         }
 
+        # Feature toggles are derived from config + CLI mode (minimal/full)
         self.features = {
             "glucose": self._getbool("Features", "glucose", True),
             "weather": self._getbool("Features", "weather", True),
@@ -38,8 +41,9 @@ class DisplayManager:
         }
 
         self.matrix = self.setup_matrix()
-        self.renderer = Renderer(self.matrix, logger=self.logger)
+        self.renderer = Renderer(self.matrix, logger=self.logger)  # change-aware double buffering
         self.display_index = 0
+        # Render order respects enabled features only
         self.display_order: List[str] = [
             name for name in ("glucose", "weather", "sports", "stocks") if self.features.get(name)
         ]
@@ -78,6 +82,7 @@ class DisplayManager:
                 cache_ttl_seconds=self.cache_ttls["sports"],
             )
 
+        # Kick off stock refresh at market close daily (4 PM local)
         self.market_close_time = dtime(16, 0)
         schedule.every().day.at(self.market_close_time.strftime("%H:%M")).do(
             self.fetch_stock_data_on_market_close
@@ -166,6 +171,7 @@ class DisplayManager:
                 schedule.run_pending()
                 continue
 
+            # Cycle through enabled panels; per-panel renderer decides if redraw is needed
             panel = self.display_order[self.display_index % len(self.display_order)]
             if panel == "glucose" and self.glucose_display:
                 self._render_glucose(font_small, font_large)
@@ -192,6 +198,7 @@ class DisplayManager:
         return graphics.DrawText(canvas, font, x, y, color, text)
 
     def _sleep_with_pending(self, seconds: float):
+        # Sleep in short slices so scheduled jobs (like stock refresh) still run
         end = time.monotonic() + max(seconds, 0)
         while time.monotonic() < end:
             time.sleep(min(0.5, end - time.monotonic()))
@@ -282,7 +289,6 @@ class DisplayManager:
 
         def draw_forecast(canvas):
             canvas.Clear()
-            self._draw_header_text(canvas, font_small, header_text, graphics.Color(200, 120, 0))
             self.weather_display.render_forecast(canvas, font_small, forecast)
 
         self.renderer.render("weather-forecast", forecast_sig, draw_forecast)

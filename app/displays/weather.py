@@ -161,8 +161,10 @@ class WeatherDisplay(BaseDisplay):
                 0, x_center - self._measure_text(font_small, high_text) // 2
             )
             low_x = max(0, x_center - self._measure_text(font_small, low_text) // 2)
-            self.draw_text(canvas, font_small, high_x, 25, high_color, high_text)
-            self.draw_text(canvas, font_small, low_x, 31, low_color, low_text)
+            # Draw a small shadow behind numbers to improve contrast/crispness
+            shadow_color = graphics.Color(0, 0, 0)
+            self.draw_text_with_shadow(canvas, font_small, high_x, 25, high_color, shadow_color, high_text)
+            self.draw_text_with_shadow(canvas, font_small, low_x, 31, low_color, shadow_color, low_text)
 
     def render_marquee(self, canvas, font_small, weather_data=None):
         weather_data = weather_data or self.snapshot_current()
@@ -183,7 +185,8 @@ class WeatherDisplay(BaseDisplay):
             self.marquee_message,
         )
         self.marquee_x -= self.scroll_speed
-        finished = self.marquee_x + scroll_width < 0
+        # treat <= 0 as finished to avoid one-pixel stuck conditions
+        finished = self.marquee_x + scroll_width <= 0
         if finished:
             # Reset position for the next cycle
             self.marquee_x = float(self.display_width)
