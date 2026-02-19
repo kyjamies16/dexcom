@@ -1,9 +1,22 @@
-from typing import Optional
+# weather.py
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Optional, Dict, Any
 
 from ..matrix.helper import graphics
 from ..services.weather import Weather
 from ..utils.cache import DataCache
 from .base import BaseDisplay
+
+
+@dataclass(frozen=True)
+class WeatherCompactState:
+    """Small, reusable weather state for composite layouts (e.g., HybridDisplay)."""
+    temp_f: Optional[int]
+    icon: object  # PIL Image or None
+    city: str
+    
 
 
 class WeatherDisplay(BaseDisplay):
@@ -15,6 +28,7 @@ class WeatherDisplay(BaseDisplay):
     ):
         self.city = config["Weather"].get("city", "Austin")
         api_key = config["Weather"]["api_key"]
+
         cache_ttls = cache_ttls or {}
         current_ttl = int(
             cache_ttls.get(
@@ -23,8 +37,12 @@ class WeatherDisplay(BaseDisplay):
             )
         )
         forecast_ttl = int(
-            cache_ttls.get("weather_forecast", config["Weather"].get("forecast_cache_ttl_seconds", "900"))
+            cache_ttls.get(
+                "weather_forecast",
+                config["Weather"].get("forecast_cache_ttl_seconds", "900"),
+            )
         )
+
         self.weather = Weather(
             api_key,
             city=self.city,
@@ -32,47 +50,72 @@ class WeatherDisplay(BaseDisplay):
             current_ttl_seconds=current_ttl,
             forecast_ttl_seconds=forecast_ttl,
         )
-        self.current_panel_duration = int(
-            config["Weather"].get("current_panel_seconds", "15")
-        )
-        self.forecast_panel_duration = int(
-            config["Weather"].get("forecast_panel_seconds", "15")
-        )
-        self.marquee_panel_duration = int(
-            config["Weather"].get("marquee_panel_seconds", "15")
-        )
-        self.icon_cache = {}
+
+        # panel durations (used by DisplayManager)
+        self.current_panel_duration = int(config["Weather"].get("current_panel_seconds", "15"))
+        self.forecast_panel_duration = int(config["Weather"].get("forecast_panel_seconds", "15"))
+        self.marquee_panel_duration = int(config["Weather"].get("marquee_panel_seconds", "15"))
+
+        # rendering/marquee state
+        self.icon_cache: Dict[str, Any] = {}
         self.display_width = int(config.get("RGBMatrix", "cols", fallback="64"))
-        self.scroll_speed = max(
-            1, int(config["Weather"].get("scroll_speed_pixels", "1"))
-        )
+        self.scroll_speed = max(1, int(config["Weather"].get("scroll_speed_pixels", "1")))
         self.marquee_message = ""
         self.marquee_x = float(self.display_width)
 
-    def snapshot_current(self):
+    # -------------------------
+    # Data access
+    # -------------------------
+    def snapshot_current(self) -> Optional[Dict[str, Any]]:
         return self.weather.get_current_weather()
 
     def snapshot_forecast(self, days: int = 3):
         return self.weather.get_multi_day_forecast(days=days)
 
+    def compact_state(self, weather_data: Optional[Dict[str, Any]] = None) -> Optional[WeatherCompactState]:
+        """
+        Return compact, reusable state for layouts that want temp/icon/text without
+        duplicating parsing/caching logic.
+        """
+        weather_data = weather_data or self.snapshot_current()
+        if not weather_data:
+            return None
+
+        main_section = weather_data.get("main", {})
+        temperature = main_section.get("temp")
+        temp_f = int(temperature) if temperature is not None else None
+
+        weather = weather_data.get("weather") or [{}]
+        icon_code = weather[0].get("icon")
+        icon = self._get_icon(icon_code)
+
+        desc = (weather[0].get("description") or "").strip()
+        text = self._format_condition_text(desc) if desc else ""
+
+        return WeatherCompactState(
+            temp_f=temp_f,
+            icon=icon,
+            city=self.city
+        )
+
+    # -------------------------
+    # Marquee helpers
+    # -------------------------
     def marquee_signature(self, weather_data: Optional[dict]):
         description = ""
         if weather_data:
             weather = weather_data.get("weather") or [{}]
             description = (weather[0].get("description") or "").strip()
-        message = (
-            self._format_condition_text(description)
-            if description
-            else "Weather report"
-        )
+        message = self._format_condition_text(description) if description else "Weather report"
         return message
 
+    # -------------------------
+    # Existing full-screen renders
+    # -------------------------
     def render_current(self, canvas, font_large, font_small, font_mini, weather_data=None):
         weather_data = weather_data or self.snapshot_current()
         if not weather_data:
-            self.draw_text(
-                canvas, font_large, 16, 22, graphics.Color(255, 255, 255), "N/A"
-            )
+            self.draw_text(canvas, font_large, 16, 22, graphics.Color(255, 255, 255), "N/A")
             return
 
         main_section = weather_data.get("main", {})
@@ -94,25 +137,11 @@ class WeatherDisplay(BaseDisplay):
         text_x = 32
         if temperature is not None:
             temp_text = f"{int(temperature)}{degree_symbol}F"
-            self.draw_text(
-                canvas,
-                font_large,
-                text_x,
-                18,
-                graphics.Color(255, 255, 255),
-                temp_text,
-            )
+            self.draw_text(canvas, font_large, text_x, 18, graphics.Color(255, 255, 255), temp_text)
 
         if feels_like is not None:
             feels_text = f"Feels {int(feels_like)}{degree_symbol}"
-            self.draw_text(
-                canvas,
-                font_mini,
-                24,
-                28,
-                graphics.Color(173, 216, 230),
-                feels_text.upper(),
-            )
+            self.draw_text(canvas, font_mini, 24, 28, graphics.Color(173, 216, 230), feels_text.upper())
 
     def render_forecast(self, canvas, font_small, forecast=None):
         forecast = forecast or self.snapshot_forecast(days=3)
@@ -134,6 +163,7 @@ class WeatherDisplay(BaseDisplay):
         columns = len(forecast)
         column_width = max(18, 64 // columns)
         divider_color = graphics.Color(45, 60, 80)
+
         for idx, day_data in enumerate(forecast):
             x_start = idx * column_width
             x_center = x_start + column_width // 2
@@ -143,9 +173,7 @@ class WeatherDisplay(BaseDisplay):
             label = day_data.get("day")
             if label:
                 label_text = label[:3]
-                label_x = max(
-                    0, x_center - self._measure_text(font_small, label_text) // 2
-                )
+                label_x = max(0, x_center - self._measure_text(font_small, label_text) // 2)
                 self.draw_text(canvas, font_small, label_x, 8, label_color, label_text)
 
             icon = self._get_icon(day_data.get("icon"))
@@ -157,11 +185,9 @@ class WeatherDisplay(BaseDisplay):
             degree_symbol = chr(176)
             high_text = f"{int(day_data['high'])}{degree_symbol}"
             low_text = f"{int(day_data['low'])}{degree_symbol}"
-            high_x = max(
-                0, x_center - self._measure_text(font_small, high_text) // 2
-            )
+            high_x = max(0, x_center - self._measure_text(font_small, high_text) // 2)
             low_x = max(0, x_center - self._measure_text(font_small, low_text) // 2)
-            # Draw a small shadow behind numbers to improve contrast/crispness
+
             shadow_color = graphics.Color(0, 0, 0)
             self.draw_text_with_shadow(canvas, font_small, high_x, 25, high_color, shadow_color, high_text)
             self.draw_text_with_shadow(canvas, font_small, low_x, 31, low_color, shadow_color, low_text)
@@ -176,6 +202,7 @@ class WeatherDisplay(BaseDisplay):
         scroll_width = self._measure_text(font_small, self.marquee_message)
         if scroll_width <= 0:
             return True
+
         self.draw_text(
             canvas,
             font_small,
@@ -185,13 +212,15 @@ class WeatherDisplay(BaseDisplay):
             self.marquee_message,
         )
         self.marquee_x -= self.scroll_speed
-        # treat <= 0 as finished to avoid one-pixel stuck conditions
+
         finished = self.marquee_x + scroll_width <= 0
         if finished:
-            # Reset position for the next cycle
             self.marquee_x = float(self.display_width)
         return finished
 
+    # -------------------------
+    # Internal utilities
+    # -------------------------
     def _get_icon(self, icon_code):
         if not icon_code:
             return None
