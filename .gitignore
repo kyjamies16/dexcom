@@ -17,3 +17,16 @@ config.local.ini
 
 # Misc
 *.log
+
+# Python
+__pycache__/
+*.pyc
+
+# Local output
+out/
+
+# OS
+.DS_Store
+
+# Env
+.env
